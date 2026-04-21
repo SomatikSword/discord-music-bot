@@ -3,10 +3,10 @@ import os
 import random
 import asyncio
 import threading
-import yt_dlp
 from flask import Flask
 from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from googleapiclient.discovery import build
 
 load_dotenv()
 
@@ -14,16 +14,50 @@ load_dotenv()
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
 if not DISCORD_TOKEN:
-    raise ValueError("DISCORD_TOKEN не задан в Render env")
+    raise ValueError("DISCORD_TOKEN не задан")
 
 if not CHANNEL_ID:
-    raise ValueError("CHANNEL_ID не задан в Render env")
+    raise ValueError("CHANNEL_ID не задан")
+
+if not YOUTUBE_API_KEY:
+    raise ValueError("YOUTUBE_API_KEY не задан")
 
 CHANNEL_ID = int(CHANNEL_ID)
 
-# ================= FLASK =================
+# ================= YOUTUBE API =================
+
+youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
+
+def get_youtube_video(query: str):
+    try:
+        request = youtube.search().list(
+            q=query,
+            part="snippet",
+            type="video",
+            maxResults=10
+        )
+
+        response = request.execute()
+        items = response.get("items", [])
+
+        if not items:
+            print("⚠️ EMPTY:", query)
+            return None
+
+        video = random.choice(items)
+        video_id = video["id"]["videoId"]
+
+        return f"https://www.youtube.com/watch?v={video_id}"
+
+    except Exception as e:
+        print("YT API ERROR:", e)
+        return None
+
+
+# ================= FLASK (Render keep alive) =================
 
 app = Flask(__name__)
 
@@ -35,36 +69,11 @@ def run_web():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
+
 # ================= DISCORD =================
 
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
-
-# ================= YT-DLP SEARCH =================
-
-def get_youtube_video(query):
-    try:
-        ydl_opts = {
-            "quiet": True,
-            "skip_download": True,
-            "extract_flat": True,
-            "default_search": "ytsearch10"
-        }
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            result = ydl.extract_info(query, download=False)
-
-        entries = result.get("entries", [])
-        if not entries:
-            print("Пустой результат:", query)
-            return None
-
-        video = random.choice(entries)
-        return f"https://www.youtube.com/watch?v={video['id']}"
-
-    except Exception as e:
-        print("YT-DLP ERROR:", e)
-        return None
 
 
 # ================= SEND FUNCTION =================
@@ -76,11 +85,11 @@ async def send_ost():
         channel = await client.fetch_channel(CHANNEL_ID)
 
         queries = [
-            "Star Wars The Old Republic OST",
+            "Star Wars The Old Republic OST full",
             "Knights of the Old Republic soundtrack",
-            "Star Wars ambient music 1 hour",
-            "SWTOR OST compilation",
-            "Star Wars cinematic music"
+            "Star Wars cinematic music 1 hour",
+            "SWTOR ambient music compilation",
+            "Star Wars music mix orchestral"
         ]
 
         random.shuffle(queries)
@@ -88,15 +97,16 @@ async def send_ost():
         video_url = None
 
         for q in queries:
+            print("SEARCH:", q)
             video_url = get_youtube_video(q)
             if video_url:
                 break
 
         if not video_url:
-            await channel.send("❌ OST не найден")
+            await channel.send("❌ OST не найден (API error)")
             return
 
-        await channel.send(f"🎧 OST:\n{video_url}")
+        await channel.send(f"🎧 Daily OST:\n{video_url}")
 
     except Exception as e:
         print("SEND ERROR:", e)
@@ -106,14 +116,14 @@ async def send_ost():
 
 scheduler = AsyncIOScheduler()
 
-TEST_MODE = True   # 🔥 TRUE = каждые 1 минута
+TEST_MODE = True   # 🔥 True = 1 минута / False = 10:00 МСК
 
 def start_scheduler():
     if scheduler.running:
         return
 
     if TEST_MODE:
-        print("🧪 TEST MODE: 1 минута")
+        print("🧪 TEST MODE: каждые 1 минуту")
         scheduler.add_job(lambda: asyncio.create_task(send_ost()), "interval", minutes=1)
     else:
         print("⏰ PROD MODE: 10:00 МСК (07:00 UTC)")
@@ -131,14 +141,12 @@ async def on_ready():
 
     start_scheduler()
 
-    # тест сразу при запуске (можно убрать позже)
+    # тест при старте (можно убрать позже)
     await send_ost()
 
 
-# ================= START FLASK =================
+# ================= START =================
 
 threading.Thread(target=run_web, daemon=True).start()
-
-# ================= RUN BOT =================
 
 client.run(DISCORD_TOKEN)
