@@ -15,7 +15,7 @@ CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
 print("TOKEN:", bool(DISCORD_TOKEN))
 print("CHANNEL_ID:", CHANNEL_ID)
 
-# --- Flask ---
+# ---------- Flask ----------
 
 app = Flask(__name__)
 
@@ -28,13 +28,13 @@ def run_web():
     print("Запуск Flask на порту:", port)
     app.run(host="0.0.0.0", port=port)
 
-# --- Discord ---
+# ---------- Discord ----------
 
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 
 def get_youtube_video(query):
-    print("Ищем видео по запросу:", query)
+    print("Ищем видео:", query)
 
     url = f"https://www.youtube.com/feeds/videos.xml?search_query={query.replace(' ', '+')}"
     feed = feedparser.parse(url)
@@ -46,42 +46,43 @@ def get_youtube_video(query):
     print("Видео найдено")
     return feed.entries[0].link
 
-
 async def send_ost():
-    print("send_ost() вызвана")
+    print("send_ost вызвана")
 
-    channel = client.get_channel(CHANNEL_ID)
+    try:
+        channel = client.get_channel(CHANNEL_ID)
 
-    if channel is None:
-        print("ОШИБКА: канал не найден")
-        return
+        if channel is None:
+            print("Канал не найден через cache, пробуем fetch")
+            channel = await client.fetch_channel(CHANNEL_ID)
 
-    print("Канал найден")
+        print("Канал получен:", channel.name)
 
-    queries = [
-        "Star Wars The Old Republic OST",
-        "Knights of the Old Republic soundtrack",
-        "Star Wars movie soundtrack",
-        "SWTOR ambient music"
-    ]
+        queries = [
+            "Star Wars The Old Republic OST",
+            "Knights of the Old Republic soundtrack",
+            "Star Wars movie soundtrack",
+            "SWTOR ambient music"
+        ]
 
-    query = random.choice(queries)
-    video_url = get_youtube_video(query)
+        query = random.choice(queries)
+        video_url = get_youtube_video(query)
 
-    if video_url:
-        print("Отправляем сообщение")
-        await channel.send(f"🎧 TEST OST:\n{video_url}")
-        print("Сообщение отправлено")
-    else:
-        print("Видео отсутствует")
+        if video_url:
+            print("Отправляем сообщение...")
+            await channel.send(f"🎧 TEST OST:\n{video_url}")
+            print("Сообщение отправлено")
 
-# --- Scheduler ---
+    except Exception as e:
+        print("ОШИБКА:", e)
+
+# ---------- Scheduler ----------
 
 scheduler = AsyncIOScheduler()
 
 @scheduler.scheduled_job("interval", minutes=1)
-async def test_task():
-    print("Scheduler задача запущена")
+async def test_job():
+    print("Scheduler запустил задачу")
     await send_ost()
 
 @client.event
@@ -91,7 +92,7 @@ async def on_ready():
     print("Запускаем scheduler")
     scheduler.start()
 
-    print("Отправляем тестовое сообщение сразу")
+    print("Отправляем сообщение сразу")
     await send_ost()
 
 # запуск Flask
