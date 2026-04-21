@@ -1,8 +1,5 @@
 discord.py
-python-dotenv
-feedparser
-apscheduler
 flask
-yt-dlp
+python-dotenv
 google-api-python-client
 pytz

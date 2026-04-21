@@ -31,14 +31,28 @@ CHANNEL_ID = int(CHANNEL_ID)
 # ================= MODE =================
 
 TEST_MODE = True
-# True  -> каждую минуту
+# True  -> каждая минута
 # False -> 10:00 МСК
 
 # ================= MEMORY =================
 
 sent_videos = set()
 
-# ================= YOUTUBE API =================
+# ================= FILTER =================
+
+BANNED_WORDS = [
+    "remix",
+    "mix",
+    "movie",
+    "film",
+    "cinematic",
+    "cover",
+    "fan made",
+    "trailer",
+    "theme remake"
+]
+
+# ================= YOUTUBE =================
 
 youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
 
@@ -58,25 +72,26 @@ def get_youtube_video(query: str):
         items = response.get("items", [])
 
         if not items:
-            print("⚠️ EMPTY:", query)
+            print("EMPTY:", query)
             return None
 
         random.shuffle(items)
 
         for video in items:
+
+            title = video["snippet"]["title"].lower()
+
+            if any(word in title for word in BANNED_WORDS):
+                continue
+
             video_id = video["id"]["videoId"]
             url = f"https://www.youtube.com/watch?v={video_id}"
 
             if url not in sent_videos:
                 return url
 
-        print("⚠️ Все видео уже были отправлены — очищаем память")
-        sent_videos.clear()
-
-        video = random.choice(items)
-        video_id = video["id"]["videoId"]
-
-        return f"https://www.youtube.com/watch?v={video_id}"
+        print("Все подходящие видео уже отправлены")
+        return None
 
     except Exception as e:
         print("YT API ERROR:", e)
@@ -104,19 +119,20 @@ intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 
 
-# ================= SEND FUNCTION =================
+# ================= SEND =================
 
 async def send_ost():
-    print("▶ send_ost")
+    print("send_ost")
 
     try:
         channel = await client.fetch_channel(CHANNEL_ID)
 
         queries = [
-            "Star Wars The Old Republic OST full",
-            "Knights of the Old Republic soundtrack",
-            "SWTOR ambient music compilation",
-            "Star Wars Old Republic music playlist",
+            "Star Wars The Old Republic OST",
+            "SWTOR original soundtrack",
+            "Knights of the Old Republic OST",
+            "KOTOR game soundtrack",
+            "SWTOR ambient soundtrack"
         ]
 
         random.shuffle(queries)
@@ -124,6 +140,7 @@ async def send_ost():
         video_url = None
 
         for q in queries:
+
             print("SEARCH:", q)
 
             video_url = get_youtube_video(q)
@@ -133,7 +150,7 @@ async def send_ost():
 
         if not video_url:
             await channel.send(
-                "⚠️ Не удалось найти новое OST видео"
+                "⚠️ Не удалось найти новое OST видео (SWTOR/KOTOR)"
             )
             return
 
@@ -153,14 +170,20 @@ async def sleep_until_10am_msk():
     msk = pytz.timezone("Europe/Moscow")
 
     now = datetime.now(msk)
-    target = now.replace(hour=10, minute=0, second=0, microsecond=0)
+
+    target = now.replace(
+        hour=10,
+        minute=0,
+        second=0,
+        microsecond=0
+    )
 
     if now > target:
         target += timedelta(days=1)
 
     seconds = (target - now).total_seconds()
 
-    print(f"⏰ Sleep {int(seconds)} sec until 10:00 MSK")
+    print("Sleep seconds:", int(seconds))
 
     await asyncio.sleep(seconds)
 
@@ -173,22 +196,24 @@ async def music_loop():
     while not client.is_closed():
 
         try:
-            print("🔥 LOOP TICK")
+
+            print("LOOP")
 
             await send_ost()
 
         except Exception as e:
+
             print("LOOP ERROR:", e)
 
         if TEST_MODE:
 
-            print("🧪 TEST MODE: sleep 60 sec")
+            print("TEST MODE sleep 60")
 
             await asyncio.sleep(60)
 
         else:
 
-            print("⏰ PROD MODE: wait until 10:00 MSK")
+            print("PROD MODE wait until 10:00")
 
             await sleep_until_10am_msk()
 
@@ -201,7 +226,6 @@ async def on_ready():
 
     client.loop.create_task(music_loop())
 
-    # тест сразу при запуске
     await send_ost()
 
 
