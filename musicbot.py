@@ -17,32 +17,25 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
-if not DISCORD_TOKEN:
-    raise ValueError("DISCORD_TOKEN не задан")
-
-if not CHANNEL_ID:
-    raise ValueError("CHANNEL_ID не задан")
-
-if not YOUTUBE_API_KEY:
-    raise ValueError("YOUTUBE_API_KEY не задан")
+if not DISCORD_TOKEN or not CHANNEL_ID or not YOUTUBE_API_KEY:
+    raise ValueError("Missing ENV variables")
 
 CHANNEL_ID = int(CHANNEL_ID)
 
 # ================= MODE =================
 
-TEST_MODE = True
-# True  -> каждая минута
-# False -> 10:00 МСК
+TEST_MODE = True  # True = 1 min, False = 10:00 MSK
 
-# ================= MEMORY =================
+# ================= STATE =================
 
 sent_videos = set()
+loop_started = False
 
 # ================= FILTER =================
 
 REQUIRED_WORDS = [
-    "old republic",
     "swtor",
+    "old republic",
     "knights of the old republic",
     "kotor"
 ]
@@ -67,47 +60,37 @@ def get_youtube_video(query: str):
             q=query,
             part="snippet",
             type="video",
-            maxResults=40
+            maxResults=30
         )
 
         response = request.execute()
         items = response.get("items", [])
 
         if not items:
-            print("EMPTY:", query)
             return None
 
         random.shuffle(items)
 
-        for video in items:
+        for v in items:
+            title = v["snippet"]["title"].lower()
 
-            title = video["snippet"]["title"].lower()
-
-            # проверяем обязательные слова
-            if not any(word in title for word in REQUIRED_WORDS):
+            if not any(w in title for w in REQUIRED_WORDS):
                 continue
 
-            # проверяем запрещённые слова
-            if any(word in title for word in BANNED_WORDS):
+            if any(w in title for w in BANNED_WORDS):
                 continue
 
-            video_id = video["id"]["videoId"]
+            video_id = v["id"]["videoId"]
             url = f"https://www.youtube.com/watch?v={video_id}"
 
             if url not in sent_videos:
                 return url
 
-        print("Все подходящие видео уже отправлены")
-
-        # fallback — разрешаем повтор
-        video = random.choice(items)
-
-        video_id = video["id"]["videoId"]
-
-        return f"https://www.youtube.com/watch?v={video_id}"
+        sent_videos.clear()
+        return None
 
     except Exception as e:
-        print("YT API ERROR:", e)
+        print("YT ERROR:", e)
         return None
 
 
@@ -132,112 +115,92 @@ intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 
 
-# ================= SEND =================
+# ================= CORE LOGIC =================
 
 async def send_ost():
-    print("send_ost")
-
     try:
         channel = await client.fetch_channel(CHANNEL_ID)
 
         queries = [
             "SWTOR soundtrack",
-            "Star Wars The Old Republic music",
+            "Star Wars Old Republic music",
             "KOTOR soundtrack",
-            "Knights of the Old Republic music",
-            "SWTOR ambient music"
+            "Knights of the Old Republic OST"
         ]
 
         random.shuffle(queries)
 
-        video_url = None
-
         for q in queries:
-
             print("SEARCH:", q)
 
-            video_url = get_youtube_video(q)
+            video = get_youtube_video(q)
 
-            if video_url:
-                break
+            if video:
+                sent_videos.add(video)
+                await channel.send(f"🎧 OST:\n{video}")
+                return
 
-        if not video_url:
-            await channel.send(
-                "⚠️ Не удалось найти новое OST видео (SWTOR/KOTOR)"
-            )
-            return
-
-        sent_videos.add(video_url)
-
-        print("SEND:", video_url)
-
-        await channel.send(f"🎧 OST:\n{video_url}")
+        await channel.send("⚠️ No valid SWTOR/KOTOR OST found")
 
     except Exception as e:
         print("SEND ERROR:", e)
 
 
-# ================= TIME =================
-
-async def sleep_until_10am_msk():
-    msk = pytz.timezone("Europe/Moscow")
-
-    now = datetime.now(msk)
-
-    target = now.replace(
-        hour=10,
-        minute=0,
-        second=0,
-        microsecond=0
-    )
-
-    if now > target:
-        target += timedelta(days=1)
-
-    seconds = (target - now).total_seconds()
-
-    print("Sleep seconds:", int(seconds))
-
-    await asyncio.sleep(seconds)
-
-
-# ================= LOOP =================
+# ================= LOOP (ROBUST) =================
 
 async def music_loop():
     await client.wait_until_ready()
 
-    while not client.is_closed():
+    while True:
+        print("🔥 LOOP TICK")
 
         try:
-
-            print("LOOP")
-
             await send_ost()
 
         except Exception as e:
-
             print("LOOP ERROR:", e)
 
         if TEST_MODE:
-
-            print("TEST MODE sleep 60")
-
             await asyncio.sleep(60)
-
         else:
+            await sleep_until_10am()
 
-            print("PROD MODE wait until 10:00")
 
-            await sleep_until_10am_msk()
+async def sleep_until_10am():
+    msk = pytz.timezone("Europe/Moscow")
+
+    now = datetime.now(msk)
+    target = now.replace(hour=10, minute=0, second=0, microsecond=0)
+
+    if now > target:
+        target += timedelta(days=1)
+
+    await asyncio.sleep((target - now).total_seconds())
+
+
+# ================= WATCHDOG =================
+
+async def watchdog():
+    while True:
+        print("🧠 watchdog alive")
+        await asyncio.sleep(300)
 
 
 # ================= EVENTS =================
 
 @client.event
 async def on_ready():
+    global loop_started
+
     print("Bot ready:", client.user)
 
-    client.loop.create_task(music_loop())
+    if not loop_started:
+        loop_started = True
+
+        asyncio.create_task(music_loop())
+        asyncio.create_task(watchdog())
+
+        print("LOOPS STARTED")
 
     await send_ost()
 
