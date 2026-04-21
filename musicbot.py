@@ -12,21 +12,22 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
 
+# --- Flask для Render ---
+
 app = Flask(__name__)
 
 @app.route("/")
 def home():
     return "Bot is alive"
 
-
 def run_web():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
+# --- Discord ---
 
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
-
 
 def get_youtube_video(query):
     url = f"https://www.youtube.com/feeds/videos.xml?search_query={query.replace(' ', '+')}"
@@ -37,12 +38,13 @@ def get_youtube_video(query):
 
     return feed.entries[0].link
 
-
 async def send_ost():
+    print("Отправка сообщения...")
+
     channel = client.get_channel(CHANNEL_ID)
 
     if channel is None:
-        print("Канал не найден")
+        print("Канал не найден!")
         return
 
     queries = [
@@ -56,24 +58,26 @@ async def send_ost():
     video_url = get_youtube_video(query)
 
     if video_url:
-        await channel.send(f"🎧 Daily Star Wars OST:\n{video_url}")
+        await channel.send(f"🎧 TEST OST:\n{video_url}")
+        print("Сообщение отправлено")
     else:
-        await channel.send("⚠️ OST не найден")
+        print("Видео не найдено")
 
+# --- Scheduler ---
 
 scheduler = AsyncIOScheduler()
 
-@scheduler.scheduled_job("cron", hour=10, minute=30)
-async def daily_task():
+@scheduler.scheduled_job("interval", minutes=1)
+async def test_task():
+    print("Тестовая задача запущена")
     await send_ost()
-
 
 @client.event
 async def on_ready():
     print(f"Бот запущен как {client.user}")
     scheduler.start()
 
-
+# запуск Flask
 threading.Thread(target=run_web).start()
 
 client.run(DISCORD_TOKEN)
