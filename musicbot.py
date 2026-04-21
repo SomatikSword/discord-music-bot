@@ -87,9 +87,7 @@ async def send_ost():
         queries = [
             "Star Wars The Old Republic OST full",
             "Knights of the Old Republic soundtrack",
-            "Star Wars cinematic music 1 hour",
             "SWTOR ambient music compilation",
-            "Star Wars music mix orchestral"
         ]
 
         random.shuffle(queries)
