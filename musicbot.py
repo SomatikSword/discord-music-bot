@@ -1,19 +1,19 @@
 import discord
 import os
-import feedparser
 import random
 import asyncio
+import threading
+import yt_dlp
 from flask import Flask
 from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-import threading
 
 load_dotenv()
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
 
-# ---------- Flask (Render keep alive) ----------
+# ================= Flask (Render keep-alive) =================
 
 app = Flask(__name__)
 
@@ -25,36 +25,42 @@ def run_web():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
-# ---------- Discord ----------
+# ================= Discord =================
 
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 
-# ---------- safer youtube RSS search ----------
+# ================= YouTube search (NO API) =================
 
-def get_youtube_video(query: str):
+def get_youtube_video(query):
     try:
-        url = f"https://www.youtube.com/feeds/videos.xml?search_query={query.replace(' ', '+')}"
-        feed = feedparser.parse(url)
+        ydl_opts = {
+            "quiet": True,
+            "skip_download": True,
+            "extract_flat": True,
+            "default_search": "ytsearch10"
+        }
 
-        entries = getattr(feed, "entries", None)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            result = ydl.extract_info(query, download=False)
 
+        entries = result.get("entries", [])
         if not entries:
-            print("RSS пустой для:", query)
+            print("Пустой результат:", query)
             return None
 
         video = random.choice(entries)
-        return video.link
+        return f"https://www.youtube.com/watch?v={video['id']}"
 
     except Exception as e:
-        print("RSS error:", e)
+        print("YT-DLP ERROR:", e)
         return None
 
 
-# ---------- Discord sending ----------
+# ================= Core send function =================
 
 async def send_ost():
-    print("▶ send_ost")
+    print("▶ send_ost вызвана")
 
     try:
         channel = await client.fetch_channel(CHANNEL_ID)
@@ -62,11 +68,11 @@ async def send_ost():
         queries = [
             "Star Wars The Old Republic OST",
             "Knights of the Old Republic soundtrack",
-            "Star Wars movie soundtrack",
-            "SWTOR ambient music"
+            "Star Wars ambient music 1 hour",
+            "SWTOR OST compilation",
+            "Star Wars cinematic music"
         ]
 
-        # пробуем несколько запросов, а не один
         random.shuffle(queries)
 
         video_url = None
@@ -86,36 +92,48 @@ async def send_ost():
         print("SEND ERROR:", e)
 
 
-# ---------- Scheduler ----------
+# ================= Scheduler =================
 
 scheduler = AsyncIOScheduler()
 
-async def job_wrapper():
+TEST_MODE = True   # 🔥 ВКЛЮЧИ ДЛЯ ТЕСТА
+
+async def job():
     await send_ost()
 
-@scheduler.scheduled_job("cron", hour=7, minute=0)  # UTC
-def scheduled_job():
-    asyncio.create_task(job_wrapper())
+
+def start_scheduler():
+    if TEST_MODE:
+        print("🧪 TEST MODE: каждые 1 минуту")
+        scheduler.add_job(lambda: asyncio.create_task(job()), "interval", minutes=1)
+    else:
+        print("⏰ PROD MODE: 10:00 МСК (07:00 UTC)")
+        scheduler.add_job(
+            lambda: asyncio.create_task(job()),
+            "cron",
+            hour=7,
+            minute=0
+        )
+
+    scheduler.start()
 
 
-# ---------- Bot ----------
+# ================= Discord events =================
 
 @client.event
 async def on_ready():
     print("Bot ready:", client.user)
 
-    if not scheduler.running:
-        scheduler.start()
-        print("Scheduler started")
+    start_scheduler()
 
-    # первое сообщение при запуске
-    await send_ost()
+    # ⚠️ убираем автоспам при старте (важно)
+    print("Scheduler started")
 
 
-# ---------- Start Flask ----------
+# ================= Start Flask =================
 
 threading.Thread(target=run_web, daemon=True).start()
 
-# ---------- Run bot ----------
+# ================= Run bot =================
 
 client.run(DISCORD_TOKEN)
