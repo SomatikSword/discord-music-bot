@@ -243,7 +243,7 @@ async def music_loop():
         if TEST_MODE:
             await asyncio.sleep(60)          # тест: каждую минуту
         else:
-            await sleep_until_10am()         # прод: каждый день в 10:00 МСК
+            await sleep_until_12am()         # прод: каждый день в 12:00 МСК
 
 async def sleep_until_10am():
     msk = pytz.timezone("Europe/Moscow")
