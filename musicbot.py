@@ -24,7 +24,7 @@ if not DISCORD_TOKEN or not CHANNEL_ID or not YOUTUBE_API_KEY:
 CHANNEL_ID = int(CHANNEL_ID)
 
 # ================= MODE =================
-TEST_MODE = True  # True = каждую минуту, False = каждый день в 10:00 МСК
+TEST_MODE = False  # True = каждую минуту, False = каждый день в 10:00 МСК
 
 # ================= STATE =================
 sent_videos = set()      # хранит ссылки уже отправленных видео
