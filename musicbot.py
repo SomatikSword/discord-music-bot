@@ -10,18 +10,20 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 load_dotenv()
 
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+# ================= ENV =================
 
-if not DISCORD_TOKEN:
-    raise ValueError("DISCORD_TOKEN не задан в env")
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 
+if not DISCORD_TOKEN:
+    raise ValueError("DISCORD_TOKEN не задан в Render env")
+
 if not CHANNEL_ID:
-    raise ValueError("CHANNEL_ID не задан в env")
+    raise ValueError("CHANNEL_ID не задан в Render env")
 
 CHANNEL_ID = int(CHANNEL_ID)
 
-# ================= Flask (Render keep-alive) =================
+# ================= FLASK =================
 
 app = Flask(__name__)
 
@@ -33,12 +35,12 @@ def run_web():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
-# ================= Discord =================
+# ================= DISCORD =================
 
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 
-# ================= YouTube search (NO API) =================
+# ================= YT-DLP SEARCH =================
 
 def get_youtube_video(query):
     try:
@@ -65,10 +67,10 @@ def get_youtube_video(query):
         return None
 
 
-# ================= Core send function =================
+# ================= SEND FUNCTION =================
 
 async def send_ost():
-    print("▶ send_ost вызвана")
+    print("▶ send_ost")
 
     try:
         channel = await client.fetch_channel(CHANNEL_ID)
@@ -91,42 +93,37 @@ async def send_ost():
                 break
 
         if not video_url:
-            await channel.send("❌ Не удалось найти OST видео")
+            await channel.send("❌ OST не найден")
             return
 
-        await channel.send(f"🎧 Daily OST:\n{video_url}")
+        await channel.send(f"🎧 OST:\n{video_url}")
 
     except Exception as e:
         print("SEND ERROR:", e)
 
 
-# ================= Scheduler =================
+# ================= SCHEDULER =================
 
 scheduler = AsyncIOScheduler()
 
-TEST_MODE = True   # 🔥 ВКЛЮЧИ ДЛЯ ТЕСТА
-
-async def job():
-    await send_ost()
-
+TEST_MODE = True   # 🔥 TRUE = каждые 1 минута
 
 def start_scheduler():
+    if scheduler.running:
+        return
+
     if TEST_MODE:
-        print("🧪 TEST MODE: каждые 1 минуту")
-        scheduler.add_job(lambda: asyncio.create_task(job()), "interval", minutes=1)
+        print("🧪 TEST MODE: 1 минута")
+        scheduler.add_job(lambda: asyncio.create_task(send_ost()), "interval", minutes=1)
     else:
         print("⏰ PROD MODE: 10:00 МСК (07:00 UTC)")
-        scheduler.add_job(
-            lambda: asyncio.create_task(job()),
-            "cron",
-            hour=7,
-            minute=0
-        )
+        scheduler.add_job(lambda: asyncio.create_task(send_ost()), "cron", hour=7, minute=0)
 
     scheduler.start()
+    print("Scheduler started")
 
 
-# ================= Discord events =================
+# ================= EVENTS =================
 
 @client.event
 async def on_ready():
@@ -134,14 +131,14 @@ async def on_ready():
 
     start_scheduler()
 
-    # ⚠️ убираем автоспам при старте (важно)
-    print("Scheduler started")
+    # тест сразу при запуске (можно убрать позже)
+    await send_ost()
 
 
-# ================= Start Flask =================
+# ================= START FLASK =================
 
 threading.Thread(target=run_web, daemon=True).start()
 
-# ================= Run bot =================
+# ================= RUN BOT =================
 
 client.run(DISCORD_TOKEN)
