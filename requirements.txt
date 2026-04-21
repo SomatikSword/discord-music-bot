@@ -3,3 +3,4 @@ python-dotenv
 feedparser
 apscheduler
 flask
+yt-dlp

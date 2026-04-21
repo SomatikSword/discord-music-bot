@@ -11,7 +11,15 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 load_dotenv()
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
+
+if not DISCORD_TOKEN:
+    raise ValueError("DISCORD_TOKEN не задан в env")
+CHANNEL_ID = os.getenv("CHANNEL_ID")
+
+if not CHANNEL_ID:
+    raise ValueError("CHANNEL_ID не задан в env")
+
+CHANNEL_ID = int(CHANNEL_ID)
 
 # ================= Flask (Render keep-alive) =================
 
