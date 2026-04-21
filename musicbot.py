@@ -5,7 +5,8 @@ import asyncio
 import threading
 from flask import Flask
 from dotenv import load_dotenv
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from datetime import datetime, timedelta
+import pytz
 from googleapiclient.discovery import build
 
 load_dotenv()
@@ -26,6 +27,10 @@ if not YOUTUBE_API_KEY:
     raise ValueError("YOUTUBE_API_KEY не задан")
 
 CHANNEL_ID = int(CHANNEL_ID)
+
+# ================= MODE SWITCH =================
+
+TEST_MODE = True   # 🔥 True = каждые 1 минуту / False = 10:00 МСК
 
 # ================= YOUTUBE API =================
 
@@ -57,7 +62,7 @@ def get_youtube_video(query: str):
         return None
 
 
-# ================= FLASK (Render keep alive) =================
+# ================= FLASK =================
 
 app = Flask(__name__)
 
@@ -76,7 +81,7 @@ intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 
 
-# ================= SEND FUNCTION =================
+# ================= SEND =================
 
 async def send_ost():
     print("▶ send_ost")
@@ -101,34 +106,53 @@ async def send_ost():
                 break
 
         if not video_url:
-            await channel.send("❌ OST не найден (API error)")
+            await channel.send("❌ OST не найден")
             return
 
-        await channel.send(f"🎧 Daily OST:\n{video_url}")
+        await channel.send(f"🎧 OST:\n{video_url}")
 
     except Exception as e:
         print("SEND ERROR:", e)
 
 
-# ================= SCHEDULER =================
+# ================= TIME LOGIC =================
 
-scheduler = AsyncIOScheduler()
+async def sleep_until_10am_msk():
+    msk = pytz.timezone("Europe/Moscow")
 
-TEST_MODE = True   # 🔥 True = 1 минута / False = 10:00 МСК
+    now = datetime.now(msk)
+    target = now.replace(hour=10, minute=0, second=0, microsecond=0)
 
-def start_scheduler():
-    if scheduler.running:
-        return
+    if now > target:
+        target += timedelta(days=1)
 
-    if TEST_MODE:
-        print("🧪 TEST MODE: каждые 1 минуту")
-        scheduler.add_job(lambda: asyncio.create_task(send_ost()), "interval", minutes=1)
-    else:
-        print("⏰ PROD MODE: 10:00 МСК (07:00 UTC)")
-        scheduler.add_job(lambda: asyncio.create_task(send_ost()), "cron", hour=7, minute=0)
+    seconds = (target - now).total_seconds()
 
-    scheduler.start()
-    print("Scheduler started")
+    print(f"⏰ Sleep {int(seconds)} sec until 10:00 MSK")
+
+    await asyncio.sleep(seconds)
+
+
+# ================= LOOP =================
+
+async def music_loop():
+    await client.wait_until_ready()
+
+    while not client.is_closed():
+
+        try:
+            print("🔥 LOOP TICK")
+
+            await send_ost()
+
+        except Exception as e:
+            print("LOOP ERROR:", e)
+
+        if TEST_MODE:
+            print("🧪 waiting 60 sec")
+            await asyncio.sleep(60)
+        else:
+            await sleep_until_10am_msk()
 
 
 # ================= EVENTS =================
@@ -137,14 +161,16 @@ def start_scheduler():
 async def on_ready():
     print("Bot ready:", client.user)
 
-    start_scheduler()
+    client.loop.create_task(music_loop())
 
-    # тест при старте (можно убрать позже)
+    # тест сразу при старте
     await send_ost()
 
 
-# ================= START =================
+# ================= START FLASK =================
 
 threading.Thread(target=run_web, daemon=True).start()
+
+# ================= RUN =================
 
 client.run(DISCORD_TOKEN)
