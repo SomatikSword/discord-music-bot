@@ -63,7 +63,7 @@ async def send_ost():
 
 scheduler = AsyncIOScheduler()
 
-@scheduler.scheduled_job("cron", hour=10, minute=0)
+@scheduler.scheduled_job("cron", hour=10, minute=45)
 async def daily_task():
     await send_ost()
 
