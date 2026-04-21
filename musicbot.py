@@ -28,21 +28,30 @@ if not YOUTUBE_API_KEY:
 
 CHANNEL_ID = int(CHANNEL_ID)
 
-# ================= MODE SWITCH =================
+# ================= MODE =================
 
-TEST_MODE = True   # 🔥 True = каждые 1 минуту / False = 10:00 МСК
+TEST_MODE = True
+# True  -> каждую минуту
+# False -> 10:00 МСК
+
+# ================= MEMORY =================
+
+sent_videos = set()
 
 # ================= YOUTUBE API =================
 
 youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
 
+
 def get_youtube_video(query: str):
+    global sent_videos
+
     try:
         request = youtube.search().list(
             q=query,
             part="snippet",
             type="video",
-            maxResults=10
+            maxResults=25
         )
 
         response = request.execute()
@@ -51,6 +60,18 @@ def get_youtube_video(query: str):
         if not items:
             print("⚠️ EMPTY:", query)
             return None
+
+        random.shuffle(items)
+
+        for video in items:
+            video_id = video["id"]["videoId"]
+            url = f"https://www.youtube.com/watch?v={video_id}"
+
+            if url not in sent_videos:
+                return url
+
+        print("⚠️ Все видео уже были отправлены — очищаем память")
+        sent_videos.clear()
 
         video = random.choice(items)
         video_id = video["id"]["videoId"]
@@ -66,9 +87,11 @@ def get_youtube_video(query: str):
 
 app = Flask(__name__)
 
+
 @app.route("/")
 def home():
     return "Bot is alive"
+
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
@@ -81,7 +104,7 @@ intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 
 
-# ================= SEND =================
+# ================= SEND FUNCTION =================
 
 async def send_ost():
     print("▶ send_ost")
@@ -93,6 +116,7 @@ async def send_ost():
             "Star Wars The Old Republic OST full",
             "Knights of the Old Republic soundtrack",
             "SWTOR ambient music compilation",
+            "Star Wars Old Republic music playlist",
         ]
 
         random.shuffle(queries)
@@ -101,13 +125,21 @@ async def send_ost():
 
         for q in queries:
             print("SEARCH:", q)
+
             video_url = get_youtube_video(q)
+
             if video_url:
                 break
 
         if not video_url:
-            await channel.send("❌ OST не найден")
+            await channel.send(
+                "⚠️ Не удалось найти новое OST видео"
+            )
             return
+
+        sent_videos.add(video_url)
+
+        print("SEND:", video_url)
 
         await channel.send(f"🎧 OST:\n{video_url}")
 
@@ -115,7 +147,7 @@ async def send_ost():
         print("SEND ERROR:", e)
 
 
-# ================= TIME LOGIC =================
+# ================= TIME =================
 
 async def sleep_until_10am_msk():
     msk = pytz.timezone("Europe/Moscow")
@@ -149,9 +181,15 @@ async def music_loop():
             print("LOOP ERROR:", e)
 
         if TEST_MODE:
-            print("🧪 waiting 60 sec")
+
+            print("🧪 TEST MODE: sleep 60 sec")
+
             await asyncio.sleep(60)
+
         else:
+
+            print("⏰ PROD MODE: wait until 10:00 MSK")
+
             await sleep_until_10am_msk()
 
 
@@ -163,14 +201,12 @@ async def on_ready():
 
     client.loop.create_task(music_loop())
 
-    # тест сразу при старте
+    # тест сразу при запуске
     await send_ost()
 
 
-# ================= START FLASK =================
+# ================= START =================
 
 threading.Thread(target=run_web, daemon=True).start()
-
-# ================= RUN =================
 
 client.run(DISCORD_TOKEN)
