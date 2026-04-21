@@ -84,72 +84,16 @@ def normalize_text(text: str) -> str:
     return text
 
 
-def is_valid_ost_video(title: str, description: str, channel_title: str) -> bool:
+def is_valid_ost_video(title: str, description: str, channel_title: str, strict: bool = True) -> bool:
     blob = normalize_text(f"{title} {description} {channel_title}")
 
     has_theme = any(k in blob for k in THEME_KEYWORDS)
     has_music = any(k in blob for k in MUSIC_KEYWORDS)
     has_banned = any(k in blob for k in BANNED_WORDS)
 
-    return has_theme and has_music and not has_banned
-
-
-def fetch_search_items(query: str, max_results: int = 50):
-    request = youtube.search().list(
-        q=query,
-        part="snippet",
-        type="video",
-        maxResults=max_results,
-        relevanceLanguage="en",
-        safeSearch="none",
-    )
-    response = request.execute()
-    return response.get("items", [])
-
-
-def pick_video_from_items(items):
-    global sent_videos
-
-    random.shuffle(items)
-
-    # Первый проход: ищем неотправленные
-    for v in items:
-        snippet = v.get("snippet", {})
-        title = snippet.get("title", "")
-        description = snippet.get("description", "")
-        channel_title = snippet.get("channelTitle", "")
-
-        if not is_valid_ost_video(title, description, channel_title):
-            continue
-
-        video_id = v.get("id", {}).get("videoId")
-        if not video_id:
-            continue
-
-        url = f"https://www.youtube.com/watch?v={video_id}"
-
-        if url not in sent_videos:
-            return url
-
-    # Если все подходящие уже отправлялись — сбрасываем и выбираем заново
-    sent_videos.clear()
-
-    for v in items:
-        snippet = v.get("snippet", {})
-        title = snippet.get("title", "")
-        description = snippet.get("description", "")
-        channel_title = snippet.get("channelTitle", "")
-
-        if not is_valid_ost_video(title, description, channel_title):
-            continue
-
-        video_id = v.get("id", {}).get("videoId")
-        if not video_id:
-            continue
-
-        return f"https://www.youtube.com/watch?v={video_id}"
-
-    return None
+    if strict:
+        return has_theme and has_music and not has_banned
+    return has_theme and not has_banned
 
 
 def get_youtube_video(query: str):
@@ -157,7 +101,62 @@ def get_youtube_video(query: str):
         items = fetch_search_items(query=query, max_results=50)
         if not items:
             return None
-        return pick_video_from_items(items)
+
+        random.shuffle(items)
+
+        # 1) Строгий проход
+        for v in items:
+            snippet = v.get("snippet", {})
+            title = snippet.get("title", "")
+            description = snippet.get("description", "")
+            channel_title = snippet.get("channelTitle", "")
+
+            if not is_valid_ost_video(title, description, channel_title, strict=True):
+                continue
+
+            video_id = v.get("id", {}).get("videoId")
+            if not video_id:
+                continue
+
+            url = f"https://www.youtube.com/watch?v={video_id}"
+            if url not in sent_videos:
+                return url
+
+        # 2) Мягкий проход (если строгий не нашел)
+        for v in items:
+            snippet = v.get("snippet", {})
+            title = snippet.get("title", "")
+            description = snippet.get("description", "")
+            channel_title = snippet.get("channelTitle", "")
+
+            if not is_valid_ost_video(title, description, channel_title, strict=False):
+                continue
+
+            video_id = v.get("id", {}).get("videoId")
+            if not video_id:
+                continue
+
+            url = f"https://www.youtube.com/watch?v={video_id}"
+            if url not in sent_videos:
+                return url
+
+        # 3) Если все подходящее уже отправляли — очистка и повтор мягкого прохода
+        sent_videos.clear()
+
+        for v in items:
+            snippet = v.get("snippet", {})
+            title = snippet.get("title", "")
+            description = snippet.get("description", "")
+            channel_title = snippet.get("channelTitle", "")
+
+            if not is_valid_ost_video(title, description, channel_title, strict=False):
+                continue
+
+            video_id = v.get("id", {}).get("videoId")
+            if video_id:
+                return f"https://www.youtube.com/watch?v={video_id}"
+
+        return None
 
     except HttpError as e:
         print("YT HTTP ERROR:", e)
