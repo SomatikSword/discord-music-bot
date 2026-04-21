@@ -40,16 +40,18 @@ sent_videos = set()
 
 # ================= FILTER =================
 
+REQUIRED_WORDS = [
+    "old republic",
+    "swtor",
+    "knights of the old republic",
+    "kotor"
+]
+
 BANNED_WORDS = [
     "remix",
-    "mix",
-    "movie",
-    "film",
-    "cinematic",
     "cover",
     "fan made",
-    "trailer",
-    "theme remake"
+    "trailer"
 ]
 
 # ================= YOUTUBE =================
@@ -65,7 +67,7 @@ def get_youtube_video(query: str):
             q=query,
             part="snippet",
             type="video",
-            maxResults=25
+            maxResults=40
         )
 
         response = request.execute()
@@ -81,6 +83,11 @@ def get_youtube_video(query: str):
 
             title = video["snippet"]["title"].lower()
 
+            # проверяем обязательные слова
+            if not any(word in title for word in REQUIRED_WORDS):
+                continue
+
+            # проверяем запрещённые слова
             if any(word in title for word in BANNED_WORDS):
                 continue
 
@@ -91,7 +98,13 @@ def get_youtube_video(query: str):
                 return url
 
         print("Все подходящие видео уже отправлены")
-        return None
+
+        # fallback — разрешаем повтор
+        video = random.choice(items)
+
+        video_id = video["id"]["videoId"]
+
+        return f"https://www.youtube.com/watch?v={video_id}"
 
     except Exception as e:
         print("YT API ERROR:", e)
@@ -128,11 +141,11 @@ async def send_ost():
         channel = await client.fetch_channel(CHANNEL_ID)
 
         queries = [
-            "Star Wars The Old Republic OST",
-            "SWTOR original soundtrack",
-            "Knights of the Old Republic OST",
-            "KOTOR game soundtrack",
-            "SWTOR ambient soundtrack"
+            "SWTOR soundtrack",
+            "Star Wars The Old Republic music",
+            "KOTOR soundtrack",
+            "Knights of the Old Republic music",
+            "SWTOR ambient music"
         ]
 
         random.shuffle(queries)
