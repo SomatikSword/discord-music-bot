@@ -3,11 +3,13 @@ import os
 import random
 import asyncio
 import threading
+import re
 from flask import Flask
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 import pytz
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 load_dotenv()
 
@@ -31,20 +33,43 @@ TEST_MODE = True  # True = 1 min, False = 10:00 MSK
 sent_videos = set()
 loop_started = False
 
-# ================= FILTER =================
+# ================= FILTER CONFIG =================
 
-REQUIRED_WORDS = [
+THEME_KEYWORDS = [
     "swtor",
+    "star wars the old republic",
     "old republic",
+    "kotor",
     "knights of the old republic",
-    "kotor"
+]
+
+MUSIC_KEYWORDS = [
+    "ost",
+    "soundtrack",
+    "original soundtrack",
+    "official soundtrack",
+    "music",
+    "theme",
 ]
 
 BANNED_WORDS = [
     "remix",
     "cover",
     "fan made",
-    "trailer"
+    "fanmade",
+    "fan edit",
+    "extended remix",
+    "nightcore",
+    "slowed",
+    "reverb",
+    "8d",
+    "bass boosted",
+    "trailer",
+    "teaser",
+    "reaction",
+    "edit",
+    "mashup",
+    "karaoke",
 ]
 
 # ================= YOUTUBE =================
@@ -52,43 +77,91 @@ BANNED_WORDS = [
 youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
 
 
-def get_youtube_video(query: str):
+def normalize_text(text: str) -> str:
+    text = text.lower()
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def is_valid_ost_video(title: str, description: str, channel_title: str) -> bool:
+    blob = normalize_text(f"{title} {description} {channel_title}")
+
+    has_theme = any(k in blob for k in THEME_KEYWORDS)
+    has_music = any(k in blob for k in MUSIC_KEYWORDS)
+    has_banned = any(k in blob for k in BANNED_WORDS)
+
+    return has_theme and has_music and not has_banned
+
+
+def fetch_search_items(query: str, max_results: int = 50):
+    request = youtube.search().list(
+        q=query,
+        part="snippet",
+        type="video",
+        maxResults=max_results,
+        relevanceLanguage="en",
+        safeSearch="none",
+    )
+    response = request.execute()
+    return response.get("items", [])
+
+
+def pick_video_from_items(items):
     global sent_videos
 
+    random.shuffle(items)
+
+    # Первый проход: ищем неотправленные
+    for v in items:
+        snippet = v.get("snippet", {})
+        title = snippet.get("title", "")
+        description = snippet.get("description", "")
+        channel_title = snippet.get("channelTitle", "")
+
+        if not is_valid_ost_video(title, description, channel_title):
+            continue
+
+        video_id = v.get("id", {}).get("videoId")
+        if not video_id:
+            continue
+
+        url = f"https://www.youtube.com/watch?v={video_id}"
+
+        if url not in sent_videos:
+            return url
+
+    # Если все подходящие уже отправлялись — сбрасываем и выбираем заново
+    sent_videos.clear()
+
+    for v in items:
+        snippet = v.get("snippet", {})
+        title = snippet.get("title", "")
+        description = snippet.get("description", "")
+        channel_title = snippet.get("channelTitle", "")
+
+        if not is_valid_ost_video(title, description, channel_title):
+            continue
+
+        video_id = v.get("id", {}).get("videoId")
+        if not video_id:
+            continue
+
+        return f"https://www.youtube.com/watch?v={video_id}"
+
+    return None
+
+
+def get_youtube_video(query: str):
     try:
-        request = youtube.search().list(
-            q=query,
-            part="snippet",
-            type="video",
-            maxResults=30
-        )
-
-        response = request.execute()
-        items = response.get("items", [])
-
+        items = fetch_search_items(query=query, max_results=50)
         if not items:
             return None
+        return pick_video_from_items(items)
 
-        random.shuffle(items)
-
-        for v in items:
-            title = v["snippet"]["title"].lower()
-
-            if not any(w in title for w in REQUIRED_WORDS):
-                continue
-
-            if any(w in title for w in BANNED_WORDS):
-                continue
-
-            video_id = v["id"]["videoId"]
-            url = f"https://www.youtube.com/watch?v={video_id}"
-
-            if url not in sent_videos:
-                return url
-
-        sent_videos.clear()
+    except HttpError as e:
+        print("YT HTTP ERROR:", e)
         return None
-
     except Exception as e:
         print("YT ERROR:", e)
         return None
@@ -122,25 +195,26 @@ async def send_ost():
         channel = await client.fetch_channel(CHANNEL_ID)
 
         queries = [
-            "SWTOR soundtrack",
-            "Star Wars Old Republic music",
-            "KOTOR soundtrack",
-            "Knights of the Old Republic OST"
+            "SWTOR original soundtrack",
+            "Star Wars The Old Republic OST",
+            "KOTOR original soundtrack",
+            "Knights of the Old Republic OST",
+            "Star Wars Old Republic official soundtrack",
+            "KOTOR music theme",
         ]
 
         random.shuffle(queries)
 
         for q in queries:
             print("SEARCH:", q)
-
             video = get_youtube_video(q)
 
             if video:
                 sent_videos.add(video)
-                await channel.send(f"🎧 OST:\n{video}")
+                await channel.send(f"OST:\n{video}")
                 return
 
-        await channel.send("⚠️ No valid SWTOR/KOTOR OST found")
+        await channel.send("No valid SWTOR/KOTOR OST found")
 
     except Exception as e:
         print("SEND ERROR:", e)
@@ -152,11 +226,10 @@ async def music_loop():
     await client.wait_until_ready()
 
     while True:
-        print("🔥 LOOP TICK")
+        print("LOOP TICK")
 
         try:
             await send_ost()
-
         except Exception as e:
             print("LOOP ERROR:", e)
 
@@ -182,7 +255,7 @@ async def sleep_until_10am():
 
 async def watchdog():
     while True:
-        print("🧠 watchdog alive")
+        print("watchdog alive")
         await asyncio.sleep(300)
 
 
@@ -196,17 +269,15 @@ async def on_ready():
 
     if not loop_started:
         loop_started = True
-
         asyncio.create_task(music_loop())
         asyncio.create_task(watchdog())
-
         print("LOOPS STARTED")
 
+    # Одно стартовое сообщение для проверки после запуска
     await send_ost()
 
 
 # ================= START =================
 
 threading.Thread(target=run_web, daemon=True).start()
-
 client.run(DISCORD_TOKEN)
