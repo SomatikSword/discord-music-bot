@@ -115,12 +115,18 @@ def fetch_search_items(query: str, max_results: int = 50):
 def get_youtube_video(query: str):
     try:
         items = fetch_search_items(query=query, max_results=50)
-        if not items:          # если список пустой
+        print(f"По запросу '{query}' найдено {len(items)} видео")
+        if not items:
             return None
+
+        # Выведем первые 5 названий
+        for i, v in enumerate(items[:5]):
+            title = v.get("snippet", {}).get("title", "")
+            print(f"  {i+1}. {title}")
 
         random.shuffle(items)
 
-        # 1) Строгий проход (theme + music + без banned)
+        # Строгий проход
         for v in items:
             snippet = v.get("snippet", {})
             title = snippet.get("title", "")
@@ -131,14 +137,13 @@ def get_youtube_video(query: str):
                 continue
 
             video_id = v.get("id", {}).get("videoId")
-            if not video_id:
-                continue
+            if video_id:
+                url = f"https://www.youtube.com/watch?v={video_id}"
+                if url not in sent_videos:
+                    print(f"✅ Найдено (строгий): {title}")
+                    return url
 
-            url = f"https://www.youtube.com/watch?v={video_id}"
-            if url not in sent_videos:
-                return url
-
-        # 2) Мягкий проход (только theme + без banned, music не обязателен)
+        # Мягкий проход
         for v in items:
             snippet = v.get("snippet", {})
             title = snippet.get("title", "")
@@ -149,15 +154,13 @@ def get_youtube_video(query: str):
                 continue
 
             video_id = v.get("id", {}).get("videoId")
-            if not video_id:
-                continue
+            if video_id:
+                url = f"https://www.youtube.com/watch?v={video_id}"
+                if url not in sent_videos:
+                    print(f"✅ Найдено (мягкий): {title}")
+                    return url
 
-            url = f"https://www.youtube.com/watch?v={video_id}"
-            if url not in sent_videos:
-                return url
-
-        # 3) Если все подходящие видео уже были отправлены — очищаем историю
-        #    и берём первое же подходящее (даже если оно уже было отправлено ранее)
+        # Если всё уже было отправлено – очистить и взять первое мягкое
         sent_videos.clear()
         for v in items:
             snippet = v.get("snippet", {})
@@ -170,15 +173,15 @@ def get_youtube_video(query: str):
 
             video_id = v.get("id", {}).get("videoId")
             if video_id:
-                return f"https://www.youtube.com/watch?v={video_id}"
+                url = f"https://www.youtube.com/watch?v={video_id}"
+                print(f"✅ Найдено после очистки: {title}")
+                return url
 
+        print("❌ Не найдено подходящих видео")
         return None
 
-    except HttpError as e:
-        print("YT HTTP ERROR:", e)
-        return None
     except Exception as e:
-        print("YT ERROR:", e)
+        print("Ошибка в get_youtube_video:", e)
         return None
 
 # ================= FLASK (для поддержания бота на хостинге) =================
