@@ -14,7 +14,6 @@ from googleapiclient.errors import HttpError
 load_dotenv()
 
 # ================= ENV =================
-
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
@@ -25,16 +24,13 @@ if not DISCORD_TOKEN or not CHANNEL_ID or not YOUTUBE_API_KEY:
 CHANNEL_ID = int(CHANNEL_ID)
 
 # ================= MODE =================
-
-TEST_MODE = True  # True = 1 min, False = 10:00 MSK
+TEST_MODE = True  # True = каждую минуту, False = каждый день в 10:00 МСК
 
 # ================= STATE =================
-
-sent_videos = set()
+sent_videos = set()      # хранит ссылки уже отправленных видео
 loop_started = False
 
 # ================= FILTER CONFIG =================
-
 THEME_KEYWORDS = [
     "swtor",
     "star wars the old republic",
@@ -73,16 +69,13 @@ BANNED_WORDS = [
 ]
 
 # ================= YOUTUBE =================
-
 youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
-
 
 def normalize_text(text: str) -> str:
     text = text.lower()
     text = re.sub(r"[^a-z0-9\s]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
-
 
 def is_valid_ost_video(title: str, description: str, channel_title: str, strict: bool = True) -> bool:
     blob = normalize_text(f"{title} {description} {channel_title}")
@@ -95,16 +88,39 @@ def is_valid_ost_video(title: str, description: str, channel_title: str, strict:
         return has_theme and has_music and not has_banned
     return has_theme and not has_banned
 
+# ========== НОВАЯ ФУНКЦИЯ (раньше её не было) ==========
+def fetch_search_items(query: str, max_results: int = 50):
+    """
+    Выполняет поиск на YouTube и возвращает список items.
+    Если произошла ошибка или ничего не найдено, возвращает пустой список.
+    """
+    try:
+        request = youtube.search().list(
+            part="snippet",
+            q=query,
+            type="video",
+            maxResults=max_results,
+            order="relevance"
+        )
+        response = request.execute()
+        items = response.get("items", [])
+        return items
+    except HttpError as e:
+        print(f"YouTube API error: {e}")
+        return []
+    except Exception as e:
+        print(f"Unexpected error in fetch_search_items: {e}")
+        return []
 
 def get_youtube_video(query: str):
     try:
         items = fetch_search_items(query=query, max_results=50)
-        if not items:
+        if not items:          # если список пустой
             return None
 
         random.shuffle(items)
 
-        # 1) Строгий проход
+        # 1) Строгий проход (theme + music + без banned)
         for v in items:
             snippet = v.get("snippet", {})
             title = snippet.get("title", "")
@@ -122,7 +138,7 @@ def get_youtube_video(query: str):
             if url not in sent_videos:
                 return url
 
-        # 2) Мягкий проход (если строгий не нашел)
+        # 2) Мягкий проход (только theme + без banned, music не обязателен)
         for v in items:
             snippet = v.get("snippet", {})
             title = snippet.get("title", "")
@@ -140,9 +156,9 @@ def get_youtube_video(query: str):
             if url not in sent_videos:
                 return url
 
-        # 3) Если все подходящее уже отправляли — очистка и повтор мягкого прохода
+        # 3) Если все подходящие видео уже были отправлены — очищаем историю
+        #    и берём первое же подходящее (даже если оно уже было отправлено ранее)
         sent_videos.clear()
-
         for v in items:
             snippet = v.get("snippet", {})
             title = snippet.get("title", "")
@@ -165,30 +181,22 @@ def get_youtube_video(query: str):
         print("YT ERROR:", e)
         return None
 
-
-# ================= FLASK =================
-
+# ================= FLASK (для поддержания бота на хостинге) =================
 app = Flask(__name__)
-
 
 @app.route("/")
 def home():
     return "Bot is alive"
 
-
 def run_web():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
-
 # ================= DISCORD =================
-
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 
-
-# ================= CORE LOGIC =================
-
+# ================= ОТПРАВКА OST =================
 async def send_ost():
     try:
         channel = await client.fetch_channel(CHANNEL_ID)
@@ -218,52 +226,44 @@ async def send_ost():
     except Exception as e:
         print("SEND ERROR:", e)
 
-
-# ================= LOOP (ROBUST) =================
-
+# ================= ЦИКЛ ОТПРАВКИ =================
 async def music_loop():
     await client.wait_until_ready()
 
     while True:
         print("LOOP TICK")
-
         try:
             await send_ost()
         except Exception as e:
             print("LOOP ERROR:", e)
 
         if TEST_MODE:
-            await asyncio.sleep(60)
+            await asyncio.sleep(60)          # тест: каждую минуту
         else:
-            await sleep_until_10am()
-
+            await sleep_until_10am()         # прод: каждый день в 10:00 МСК
 
 async def sleep_until_10am():
     msk = pytz.timezone("Europe/Moscow")
-
     now = datetime.now(msk)
     target = now.replace(hour=10, minute=0, second=0, microsecond=0)
 
     if now > target:
         target += timedelta(days=1)
 
-    await asyncio.sleep((target - now).total_seconds())
+    wait_seconds = (target - now).total_seconds()
+    print(f"Сплю {wait_seconds} секунд до следующей отправки в 10:00 МСК")
+    await asyncio.sleep(wait_seconds)
 
-
-# ================= WATCHDOG =================
-
+# ================= СТОРОЖЕВОЙ ЗАДАЧА (для отладки) =================
 async def watchdog():
     while True:
         print("watchdog alive")
-        await asyncio.sleep(300)
+        await asyncio.sleep(300)   # раз в 5 минут пишем в лог
 
-
-# ================= EVENTS =================
-
+# ================= СОБЫТИЯ DISCORD =================
 @client.event
 async def on_ready():
     global loop_started
-
     print("Bot ready:", client.user)
 
     if not loop_started:
@@ -272,11 +272,9 @@ async def on_ready():
         asyncio.create_task(watchdog())
         print("LOOPS STARTED")
 
-    # Одно стартовое сообщение для проверки после запуска
+    # Отправить одно видео сразу после запуска (для проверки)
     await send_ost()
 
-
-# ================= START =================
-
+# ================= ЗАПУСК =================
 threading.Thread(target=run_web, daemon=True).start()
 client.run(DISCORD_TOKEN)
