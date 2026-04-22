@@ -243,18 +243,18 @@ async def music_loop():
         if TEST_MODE:
             await asyncio.sleep(60)          # тест: каждую минуту
         else:
-            await sleep_until_12am()         # прод: каждый день в 12:00 МСК
+            await sleep_until_10am()         # прод: каждый день в 10:00 МСК
 
 async def sleep_until_10am():
     msk = pytz.timezone("Europe/Moscow")
     now = datetime.now(msk)
-    target = now.replace(hour=12, minute=0, second=0, microsecond=0)
+    target = now.replace(hour=10, minute=0, second=0, microsecond=0)
 
     if now > target:
         target += timedelta(days=1)
 
     wait_seconds = (target - now).total_seconds()
-    print(f"Сплю {wait_seconds} секунд до следующей отправки в 12:00 МСК")
+    print(f"Сплю {wait_seconds} секунд до следующей отправки в 10:00 МСК")
     await asyncio.sleep(wait_seconds)
 
 # ================= СТОРОЖЕВОЙ ЗАДАЧА (для отладки) =================
