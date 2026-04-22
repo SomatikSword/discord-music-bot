@@ -275,8 +275,7 @@ async def on_ready():
         asyncio.create_task(watchdog())
         print("LOOPS STARTED")
 
-    # Отправить одно видео сразу после запуска (для проверки)
-    await send_ost()
+
 
 # ================= ЗАПУСК =================
 threading.Thread(target=run_web, daemon=True).start()
